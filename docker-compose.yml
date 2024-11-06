@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
+      - TZ=UTC
+
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: tokens
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pass123
+      TZ: UTC
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Добавлено
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      retries: 5
+
+volumes:
+  db_data:
