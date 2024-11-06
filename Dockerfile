@@ -26,17 +26,12 @@ WORKDIR /app
 COPY . .
 
 
-# Копируем скрипт wait-for-it
-COPY wait-for-it.sh /usr/local/bin/wait-for-it
-RUN chmod +x /usr/local/bin/wait-for-it
 
 # Собираем приложение
 RUN g++ -std=c++17 -o app main.cpp -lpqxx -lpq -lboost_system -lboost_thread -lboost_json -pthread
 
 # Открываем порт приложения
 EXPOSE 8080
-# Копируем конфигурацию Nginx
-COPY nginx.conf /etc/nginx/nginx.conf
 
 # Запускаем приложение
-CMD ["wait-for-it", "app:8080", "--", "nginx", "-g", "daemon off;"]
+CMD ["./app"]
