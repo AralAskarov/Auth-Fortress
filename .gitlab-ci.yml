@@ -1,0 +1,39 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  DOCKER_IMAGE: "arala/authfortress"
+  SSH_USER: "azureuser"
+  SSH_HOST: "4.233.222.126"
+  REMOTE_PATH: "/home/azureuser/Auth-Fortress"
+
+before_script:
+  - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+  - eval $(ssh-agent -s)
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh
+  - chmod 700 ~/.ssh
+
+build_job:
+  stage: build
+  script:
+    - docker build -t $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA .
+    - docker push $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker tag $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA $DOCKER_IMAGE:latest
+    - docker push $DOCKER_IMAGE:latest
+  only:
+    - main
+
+deploy_job:
+  stage: deploy
+  script:
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH"
+    - scp -o StrictHostKeyChecking=no docker-compose.yml $SSH_USER@$SSH_HOST:$REMOTE_PATH
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+        cd $REMOTE_PATH &&
+        docker-compose pull &&
+        docker-compose up -d
+      "
+  only:
+    - main
