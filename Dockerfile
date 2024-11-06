@@ -25,6 +25,11 @@ ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 WORKDIR /app
 COPY . .
 
+
+# Копируем скрипт wait-for-it
+COPY wait-for-it.sh /usr/local/bin/wait-for-it
+RUN chmod +x /usr/local/bin/wait-for-it
+
 # Собираем приложение
 RUN g++ -std=c++17 -o app main.cpp -lpqxx -lpq -lboost_system -lboost_thread -lboost_json -pthread
 
@@ -34,4 +39,4 @@ EXPOSE 8080
 COPY nginx.conf /etc/nginx/nginx.conf
 
 # Запускаем приложение
-CMD ["nginx", "-g", "daemon off;"] && ./app
+CMD ["wait-for-it", "app:8080", "--", "nginx", "-g", "daemon off;"]
