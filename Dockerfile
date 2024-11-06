@@ -30,6 +30,8 @@ RUN g++ -std=c++17 -o app main.cpp -lpqxx -lpq -lboost_system -lboost_thread -lb
 
 # Открываем порт приложения
 EXPOSE 8080
+# Копируем конфигурацию Nginx
+COPY nginx.conf /etc/nginx/nginx.conf
 
 # Запускаем приложение
-CMD ["./app"]
+CMD ["nginx", "-g", "daemon off;"] && ./app

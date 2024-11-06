@@ -5,8 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"  # Используем expose для внутренней связи
     depends_on:
       - db
     environment:
@@ -29,6 +29,15 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 10s
       retries: 5
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf  
+    ports:
+      - "80:80"  
+    depends_on:
+      - app
 
 volumes:
   db_data:
