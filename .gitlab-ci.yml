@@ -34,7 +34,7 @@ deploy_job:
   script:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH"
     - ls -la
-    - scp -r * $SSH_USER@$SSH_HOST:$REMOTE_PATH
+    - scp -rp * $SSH_USER@$SSH_HOST:$REMOTE_PATH
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
         cd $REMOTE_PATH &&
         docker-compose down --volumes --remove-orphans &&
