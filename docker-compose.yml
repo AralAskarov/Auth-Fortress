@@ -30,11 +30,24 @@ services:
       interval: 10s
       retries: 5
 
-  flyway:
+  flyway-clean:
     image: flyway/flyway:latest
     depends_on:
       - db
     entrypoint: ["flyway", "clean", "-url=jdbc:postgresql://db:5432/tokens", "-user=postgres", "-password=pass123", "-cleanDisabled=false"]
+    environment:
+      - FLYWAY_URL=jdbc:postgresql://db:5432/tokens
+      - FLYWAY_USER=postgres
+      - FLYWAY_PASSWORD=pass123
+    volumes:
+      - ./migrations:/flyway/sql
+
+  flyway-migrate:
+    image: flyway/flyway:latest
+    depends_on:
+      - db
+      - flyway-clean
+    entrypoint: ["flyway", "migrate", "-baselineOnMigrate=true"]
     environment:
       - FLYWAY_URL=jdbc:postgresql://db:5432/tokens
       - FLYWAY_USER=postgres
