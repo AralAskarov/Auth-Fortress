@@ -36,4 +36,4 @@ deploy_job:
         docker-compose up -d
       "
   only:
-    - main
+    - master
