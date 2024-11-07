@@ -34,7 +34,7 @@ services:
     image: flyway/flyway:latest
     depends_on:
       - db
-    entrypoint: ["flyway", "clean", "-url=jdbc:postgresql://db:5432/tokens", "-user=postgres", "-password=pass123"]
+    entrypoint: ["flyway", "clean", "-url=jdbc:postgresql://db:5432/tokens", "-user=postgres", "-password=pass123", "-cleanDisabled=false"]
     environment:
       - FLYWAY_URL=jdbc:postgresql://db:5432/tokens
       - FLYWAY_USER=postgres
