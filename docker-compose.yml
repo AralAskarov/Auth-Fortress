@@ -9,6 +9,7 @@ services:
       - "8080"  
     depends_on:
       - db
+      - flyway
     environment:
       - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
       - TZ=UTC
@@ -24,11 +25,22 @@ services:
       - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Добавлено
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 10s
       retries: 5
+
+  flyway:
+    image: flyway/flyway:latest
+    depends_on:
+      - db
+    entrypoint: ["flyway", "migrate"]
+    environment:
+      - FLYWAY_URL=jdbc:postgresql://db:5432/tokens
+      - FLYWAY_USER=postgres
+      - FLYWAY_PASSWORD=pass123
+    volumes:
+      - ./migrations:/flyway/sql
 
   nginx:
     image: nginx:latest
@@ -41,6 +53,3 @@ services:
 
 volumes:
   db_data:
-
-
-#1 test
