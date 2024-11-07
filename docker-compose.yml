@@ -9,7 +9,7 @@ services:
       - "8080"  
     depends_on:
       - db
-      - flyway
+      - flyway-migrate 
     environment:
       - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
       - TZ=UTC
