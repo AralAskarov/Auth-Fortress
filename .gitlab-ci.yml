@@ -32,11 +32,12 @@ deploy_job:
   tags:
     - deploy
   script:
+    - sleep 10
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH"
     - ls -la
-    - scp -rp * $SSH_USER@$SSH_HOST:$REMOTE_PATH
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
         cd $REMOTE_PATH &&
+        git pull origin master &&
         docker-compose down --volumes --remove-orphans &&
         docker-compose up -d
       "
