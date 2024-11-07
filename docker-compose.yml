@@ -66,3 +66,4 @@ services:
 
 volumes:
   db_data:
+    
