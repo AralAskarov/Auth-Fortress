@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     expose:
-      - "8080"  # Используем expose для внутренней связи
+      - "8080"  
     depends_on:
       - db
     environment:
