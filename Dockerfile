@@ -8,7 +8,6 @@ RUN apt-get clean && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get in
     make \
     wget \
     unzip \
-    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 
