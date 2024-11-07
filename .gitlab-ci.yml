@@ -33,6 +33,7 @@ deploy_job:
     - deploy
   script:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH"
+    - ls -la
     - rsync -avz --delete ./Auth-Fortress/ $SSH_USER@$SSH_HOST:$REMOTE_PATH/
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
         cd $REMOTE_PATH &&
