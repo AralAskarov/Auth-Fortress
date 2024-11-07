@@ -17,6 +17,8 @@ before_script:
 
 build_job:
   stage: build
+  tags:
+    - docker
   script:
     - docker build -t $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA .
     - docker push $DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA
@@ -27,6 +29,8 @@ build_job:
 
 deploy_job:
   stage: deploy
+  tags:
+    - deploy
   script:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH"
     - scp -o StrictHostKeyChecking=no docker-compose.yml $SSH_USER@$SSH_HOST:$REMOTE_PATH
