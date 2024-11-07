@@ -34,7 +34,7 @@ services:
     image: flyway/flyway:latest
     depends_on:
       - db
-    entrypoint: ["flyway", "migrate"]
+    entrypoint: ["flyway", "migrate", "-baselineOnMigrate=true"]
     environment:
       - FLYWAY_URL=jdbc:postgresql://db:5432/tokens
       - FLYWAY_USER=postgres
