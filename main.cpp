@@ -53,7 +53,6 @@ public:
         std::unique_lock<std::mutex> lock(mutex_);
         pool_.push(conn);
         lock.unlock();
-        // cond_.notify_one();
     }
 
 private:
@@ -61,11 +60,8 @@ private:
     std::size_t pool_size_;
     std::queue<std::shared_ptr<pqxx::connection>> pool_;
     std::mutex mutex_;
-    // std::condition_variable cond_;
 };
-// const std::string DB_CONNECTION = "dbname=tokens user=postgres password=pass123";
-// const std::string DB_CONNECTION = "host=localhost port=5432 dbname=tokens user=postgres password=pass123";
-// const std::string DB_CONNECTION = "host=db port=5432 dbname=tokens user=postgres password=pass123";
+
 json::object readSecrets();
 json::object readSecrets() {
     std::ifstream ifs("/etc/vault/secrets/config.json");
@@ -151,11 +147,9 @@ bool authenticateClient(const std::string& client_id, const std::string& client_
 
 bool isTokenValid(const std::string& token) {
     try {
-        // pqxx::connection conn(DB_CONNECTION);
         auto conn = db_pool.getConnection();
         pqxx::work txn(*conn);
 
-        // pqxx::result res = txn.exec("SELECT expiration_time AT TIME ZONE 'UTC' AS expiration_time FROM public.token WHERE access_token = " + txn.quote(token));
         pqxx::result res = txn.exec_prepared("get_token", token);
         db_pool.releaseConnection(conn);
         if (!res.empty()) {
@@ -566,8 +560,4 @@ int main() {
 
     return 0;
 }
-
-
-
-
 
