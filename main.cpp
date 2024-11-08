@@ -19,6 +19,7 @@
 #include <boost/asio/steady_timer.hpp> // Подключаем steady_timer для тайм-аута
 #include <chrono>
 #include <fstream>
+
 namespace beast = boost::beast;     
 namespace http = beast::http;       
 namespace net = boost::asio;        
@@ -28,6 +29,16 @@ namespace json = boost::json;
 // const std::string DB_CONNECTION = "dbname=tokens user=postgres password=pass123";
 // const std::string DB_CONNECTION = "host=localhost port=5432 dbname=tokens user=postgres password=pass123";
 // const std::string DB_CONNECTION = "host=db port=5432 dbname=tokens user=postgres password=pass123";
+json::object readSecrets();
+json::object readSecrets() {
+    std::ifstream ifs("/etc/vault/secrets/config.json");
+    if (!ifs.is_open()) {
+        throw std::runtime_error("Unable to open secrets file");
+    }
+    std::string content((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
+    json::value jv = json::parse(content);
+    return jv.as_object();
+}
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
 // Генерация уникального токена
