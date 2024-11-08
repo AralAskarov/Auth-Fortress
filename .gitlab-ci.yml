@@ -35,7 +35,7 @@ deploy_job:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $REMOTE_PATH/vault"
     - echo "$VAULT_ROLE_ID" | ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "cat > $REMOTE_PATH/vault/role_id"
     - echo "$VAULT_SECRET_ID" | ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "cat > $REMOTE_PATH/vault/secret_id"
-    - scp -o StrictHostKeyChecking=no docker-compose.yml $SSH_USER@$SSH_HOST:$REMOTE_PATH
+    #- scp -o StrictHostKeyChecking=no docker-compose.yml $SSH_USER@$SSH_HOST:$REMOTE_PATH
     # - scp -o StrictHostKeyChecking=no -r ./templates $SSH_USER@$SSH_HOST:$REMOTE_PATH
     # - scp -o StrictHostKeyChecking=no vault-agent-config.hcl $SSH_USER@$SSH_HOST:$REMOTE_PATH
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
