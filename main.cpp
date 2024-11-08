@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <iomanip> // Добавлено для std::get_time
 
 namespace beast = boost::beast;     
 namespace http = beast::http;       
@@ -218,13 +219,10 @@ void handleToken(ConnectionPool& db_pool, const http::request<http::string_body>
                 return;
             }
 
-            // Формируем строку scopes для SQL-запроса
-            std::string scopes_sql;
-            for (size_t i = 0; i < final_scopes.size(); ++i) {
-                scopes_sql += txn.quote(final_scopes[i]);
-                if (i != final_scopes.size() - 1) {
-                    scopes_sql += ", ";
-                }
+            // Формируем boost::json::array из final_scopes
+            json::array json_final_scopes;
+            for (const auto& s : final_scopes) {
+                json_final_scopes.emplace_back(s);
             }
 
             // Удаляем существующие токены для клиента
@@ -233,7 +231,7 @@ void handleToken(ConnectionPool& db_pool, const http::request<http::string_body>
 
             // Вставляем новый токен
             txn.exec0("INSERT INTO public.token (client_id, access_scope, access_token, expiration_time) VALUES (" +
-                      txn.quote(client_id) + ", ARRAY[" + scopes_sql + "], " + txn.quote(access_token) + 
+                      txn.quote(client_id) + ", " + txn.quote(json_final_scopes) + ", " + txn.quote(access_token) + 
                       ", CURRENT_TIMESTAMP + INTERVAL '2 hours')");
             txn.commit();
             db_pool.releaseConnection(conn);
@@ -243,7 +241,7 @@ void handleToken(ConnectionPool& db_pool, const http::request<http::string_body>
             jsonResponse["access_token"] = access_token;
             jsonResponse["expires_in"] = 7200;
             jsonResponse["refresh_token"] = "";
-            jsonResponse["scope"] = final_scopes;
+            jsonResponse["scope"] = json_final_scopes; // Используем boost::json::array
             jsonResponse["security_level"] = "normal";
             jsonResponse["token_type"] = "Bearer";
 
@@ -339,6 +337,7 @@ private:
     ConnectionPool& db_pool_;
     beast::flat_buffer buffer_;
     http::response<http::string_body> res_;
+    http::request<http::string_body> req_;
 
     void readRequest() {
         auto self = shared_from_this();
@@ -380,8 +379,6 @@ private:
                 }
             });
     }
-
-    http::request<http::string_body> req_;
 };
 
 // Обработка запросов
@@ -464,6 +461,7 @@ int main() {
         // Запуск потоков
         std::vector<std::thread> threads;
         auto thread_count = std::thread::hardware_concurrency();
+        if (thread_count == 0) thread_count = 4; // По умолчанию 4 потока
         threads.reserve(thread_count - 1);
         for (std::size_t i = 0; i < thread_count - 1; ++i) {
             threads.emplace_back([&ioc] { ioc.run(); });
