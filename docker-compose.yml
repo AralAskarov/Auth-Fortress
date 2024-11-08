@@ -79,6 +79,7 @@ services:
       - app
     networks:
       - app-network
+      
 
 networks:
   app-network:
