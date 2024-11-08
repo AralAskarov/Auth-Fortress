@@ -45,9 +45,9 @@ deploy_job:
         docker-compose pull 
       "
 
-    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
-        if [ ! -f /etc/systemd/system/authfortress.service ]; then
-          sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOL
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+      if [ ! -f /etc/systemd/system/authfortress.service ]; then
+        sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOF
       [Unit]
       Description=AuthFortress Docker Compose Service
       Requires=docker.service
@@ -56,24 +56,18 @@ deploy_job:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
-      WorkingDirectory=/home/azureuser/Auth-Fortress
+      WorkingDirectory=$REMOTE_PATH
       ExecStart=/usr/bin/docker-compose up -d
       ExecStop=/usr/bin/docker-compose down
       TimeoutStartSec=0
       
       [Install]
       WantedBy=multi-user.target
-      EOL
-          echo "authfortress.service создан."
-        else
-          echo "authfortress.service уже существует. Пропускаем создание."
-        fi
-      EOF
-
-      - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
-        sudo systemctl daemon-reload
-        sudo systemctl enable authfortress.service
+      EOF'"
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+        sudo systemctl daemon-reload &&
+        sudo systemctl enable authfortress.service &&
         sudo systemctl restart authfortress.service
-      EOF
+      "
   only:
     - master
