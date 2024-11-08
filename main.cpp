@@ -52,6 +52,8 @@ public:
     void releaseConnection(std::shared_ptr<pqxx::connection> conn) {
         std::unique_lock<std::mutex> lock(mutex_);
         pool_.push(conn);
+        lock.unlock();
+        cond_.notify_one();
     }
 
 private:
@@ -59,6 +61,7 @@ private:
     std::size_t pool_size_;
     std::queue<std::shared_ptr<pqxx::connection>> pool_;
     std::mutex mutex_;
+    std::condition_variable cond_;
 };
 // const std::string DB_CONNECTION = "dbname=tokens user=postgres password=pass123";
 // const std::string DB_CONNECTION = "host=localhost port=5432 dbname=tokens user=postgres password=pass123";
@@ -75,7 +78,7 @@ json::object readSecrets() {
 }
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-ConnectionPool db_pool(DB_CONNECTION, 15);
+ConnectionPool db_pool(DB_CONNECTION, 100);
 
 
 std::string generateToken() {
@@ -93,7 +96,8 @@ bool authenticateClient(const std::string& client_id, const std::string& client_
         //pqxx::connection conn(DB_CONNECTION);
         auto conn = db_pool.getConnection();
         pqxx::work txn(*conn);
-        pqxx::result res = txn.exec("SELECT client_secret FROM public.user WHERE client_id = " + txn.quote(client_id));
+        // pqxx::result res = txn.exec("SELECT client_secret FROM public.user WHERE client_id = " + txn.quote(client_id));
+        pqxx::result res = txn.exec_prepared("authenticate_client", client_id);
         db_pool.releaseConnection(conn);
         if (!res.empty() && res[0]["client_secret"].as<std::string>() == client_secret) {
             return true;
@@ -151,7 +155,8 @@ bool isTokenValid(const std::string& token) {
         auto conn = db_pool.getConnection();
         pqxx::work txn(*conn);
 
-        pqxx::result res = txn.exec("SELECT expiration_time AT TIME ZONE 'UTC' AS expiration_time FROM public.token WHERE access_token = " + txn.quote(token));
+        // pqxx::result res = txn.exec("SELECT expiration_time AT TIME ZONE 'UTC' AS expiration_time FROM public.token WHERE access_token = " + txn.quote(token));
+        pqxx::result res = txn.exec_prepared("get_token", token);
         db_pool.releaseConnection(conn);
         if (!res.empty()) {
             std::string dateTimeStr = res[0]["expiration_time"].as<std::string>();
@@ -240,9 +245,8 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
             pqxx::work txn(*conn);
 
 //
-            //pqxx::result res_db = txn.exec("SELECT scope FROM public.user WHERE client_id = " + txn.quote(client_id));
-            pqxx::result res_db = txn.exec("SELECT array_to_json(scope) AS scope FROM public.user WHERE client_id = " + txn.quote(client_id));
-
+            // pqxx::result res_db = txn.exec("SELECT array_to_json(scope) AS scope FROM public.user WHERE client_id = " + txn.quote(client_id));
+            pqxx::result res_db = txn.exec_prepared("get_scope", client_id);
             if (res_db.empty()) {
                 json::object errorResponse;
                 errorResponse["error"] = "invalid_client";
@@ -342,8 +346,10 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
         // res.body() = json::serialize(jsonResponse);
         try {
             // Открываем соединение с базой данных
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
+            // pqxx::connection conn(DB_CONNECTION);
+            // pqxx::work txn(conn);
+            auto conn = db_pool.getConnection();
+            pqxx::work txn(*conn);
 
             // Запрашиваем access_scope, связанный с данным токеном
             //pqxx::result res_db = txn.exec("SELECT access_scope FROM public.token WHERE access_token = " + txn.quote(token));
@@ -352,12 +358,12 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
             //     "FROM public.token t "
             //     "JOIN public.user u ON t.client_id = u.client_id "
             //     "WHERE t.access_token = " + txn.quote(token));
-            pqxx::result res_db = txn.exec(
-                "SELECT array_to_json(t.access_scope) AS access_scope, u.client_id "
-                "FROM public.token t "
-                "JOIN public.user u ON t.client_id = u.client_id "
-                "WHERE t.access_token = " + txn.quote(token));
-
+            // pqxx::result res_db = txn.exec(
+            //     "SELECT array_to_json(t.access_scope) AS access_scope, u.client_id "
+            //     "FROM public.token t "
+            //     "JOIN public.user u ON t.client_id = u.client_id "
+            //     "WHERE t.access_token = " + txn.quote(token));
+            pqxx::result res_db = txn.exec_prepared("get_token_details", token);
             if (!res_db.empty()) {
                 // Извлекаем client_id
                 // std::string client_id = res_db[0]["client_id"].c_str();
@@ -527,9 +533,24 @@ void do_session(tcp::socket socket) {
 
 int main() {
     try {
+
+        {
+            pqxx::connection conn(DB_CONNECTION);
+            pqxx::work txn(conn);
+            // Подготовка запроса для аутентификации клиента
+            txn.conn().prepare("authenticate_client", "SELECT client_secret FROM public.user WHERE client_id = $1");
+            // Подготовка запроса для получения scope клиента
+            txn.conn().prepare("get_scope", "SELECT scope FROM public.user WHERE client_id = $1");
+            // Подготовка запроса для получения токена
+            txn.conn().prepare("get_token", "SELECT expiration_time FROM public.token WHERE access_token = $1");
+            // Подготовка запроса для получения деталей токена
+            txn.conn().prepare("get_token_details", "SELECT u.client_id, t.access_scope FROM public.token t JOIN public.user u ON t.client_id = u.client_id WHERE t.access_token = $1");
+            txn.commit();
+        }
+
         net::io_context ioc;
         tcp::acceptor acceptor(ioc, {tcp::v4(), 8080});
-        boost::asio::thread_pool pool(std::thread::hardware_concurrency());
+        boost::asio::thread_pool pool(std::thread::hardware_concurrency() * 2);
 
         while (true) {
             tcp::socket socket(ioc);
