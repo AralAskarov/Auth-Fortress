@@ -48,7 +48,7 @@ deploy_job:
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
         sudo systemctl start authfortress.service &&
         sudo systemctl start auth-fortress_db.service &&
-        sudo systemctl start auth-fortress_nginx.service &&
+        sudo systemctl start auth-fortress_nginx.service 
       "
     
   only:
