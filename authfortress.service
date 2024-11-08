@@ -1,15 +1,13 @@
 [Unit]
-Description=AuthFortress Docker Compose Service
+Description=Auth-Fortress App Container
 Requires=docker.service
 After=docker.service
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/home/azureuser/Auth-Fortress
-ExecStart=/usr/bin/docker-compose up -d
-ExecStop=/usr/bin/docker-compose down
-TimeoutStartSec=0
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/docker start -a auth-fortress_app_1
+ExecStop=/usr/bin/docker stop auth-fortress_app_1
 
 [Install]
 WantedBy=multi-user.target
