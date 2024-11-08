@@ -403,32 +403,93 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
 //     }
 //     socket.shutdown(tcp::socket::shutdown_send);
 // }
+// void do_session(tcp::socket socket) {
+//     try {
+//         beast::flat_buffer buffer;
+//         http::request<http::string_body> req;
+//         http::response<http::string_body> res;
+
+//         http::read(socket, buffer, req);
+
+//         if (req.method() == http::verb::post && req.target() == "/token") {
+//             handleToken(req, res);
+//         } else if (req.method() == http::verb::get && req.target() == "/check") {
+//             handleCheck(req, res);
+//         } else {
+//             res.result(http::status::not_found);
+//             res.body() = "Not Found";
+//             res.prepare_payload();
+//         }
+
+//         http::write(socket, res);
+//     } catch (const beast::system_error& se) {
+//         if (se.code() != http::error::end_of_stream)
+//             std::cerr << "Error: " << se.code().message() << std::endl;
+//     }
+
+//     socket.shutdown(tcp::socket::shutdown_send);
+// }
+
 void do_session(tcp::socket socket) {
     try {
         beast::flat_buffer buffer;
-        http::request<http::string_body> req;
-        http::response<http::string_body> res;
+        boost::asio::steady_timer timer(socket.get_executor());
 
-        http::read(socket, buffer, req);
+        // Начало цикла для обработки нескольких запросов на одном соединении
+        while (true) {
+            http::request<http::string_body> req;
+            http::response<http::string_body> res;
 
-        if (req.method() == http::verb::post && req.target() == "/token") {
-            handleToken(req, res);
-        } else if (req.method() == http::verb::get && req.target() == "/check") {
-            handleCheck(req, res);
-        } else {
-            res.result(http::status::not_found);
-            res.body() = "Not Found";
-            res.prepare_payload();
+            timer.expires_after(std::chrono::seconds(20));
+
+            // Ожидание выполнения операции или тайм-аута
+            timer.async_wait([&socket](const boost::system::error_code& ec) {
+                if (!ec) {
+                    // Если таймер сработал без ошибок, закрываем сокет
+                    socket.close();
+                }
+            });
+
+            // Чтение запроса
+            http::read(socket, buffer, req);
+
+            timer.cancel();
+            // Обработка запроса в зависимости от пути
+            if (req.method() == http::verb::post && req.target() == "/token") {
+                handleToken(req, res);
+            } else if (req.method() == http::verb::get && req.target() == "/check") {
+                handleCheck(req, res);
+            } else {
+                res.result(http::status::not_found);
+                res.body() = "Not Found";
+                res.prepare_payload();
+            }
+
+            // Если клиент указал Connection: close, закрываем соединение после ответа
+            if (req[http::field::connection] == "close") {
+                res.set(http::field::connection, "close");
+                http::write(socket, res);
+                break; // Выходим из цикла и закрываем сокет
+            } else {
+                res.set(http::field::connection, "keep-alive");
+                http::write(socket, res);
+            }
+
+            // Очищаем буфер для следующего запроса
+            buffer.consume(buffer.size());
+
+            // Устанавливаем тайм-аут на 20 секунд
+            // socket.expires_after(std::chrono::seconds(20));
         }
-
-        http::write(socket, res);
     } catch (const beast::system_error& se) {
         if (se.code() != http::error::end_of_stream)
             std::cerr << "Error: " << se.code().message() << std::endl;
     }
 
+    // Закрываем соединение после завершения всех запросов
     socket.shutdown(tcp::socket::shutdown_send);
 }
+
 
 int main() {
     try {
