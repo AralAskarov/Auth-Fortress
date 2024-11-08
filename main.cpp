@@ -477,17 +477,17 @@ void do_session(tcp::socket socket) {
             timer.expires_after(std::chrono::seconds(20));
 
             // Ожидание выполнения операции или тайм-аута
-            timer.async_wait([&socket](const boost::system::error_code& ec) {
-                if (!ec) {
-                    // Если таймер сработал без ошибок, закрываем сокет
-                    socket.close();
-                }
-            });
+            // timer.async_wait([&socket](const boost::system::error_code& ec) {
+            //     if (!ec) {
+            //         // Если таймер сработал без ошибок, закрываем сокет
+            //         socket.close();
+            //     }
+            // });
 
             // Чтение запроса
             http::read(socket, buffer, req);
 
-            timer.cancel();
+            // timer.cancel();
             // Обработка запроса в зависимости от пути
             if (req.method() == http::verb::post && req.target() == "/token") {
                 handleToken(req, res);
