@@ -26,6 +26,37 @@ namespace net = boost::asio;
 using tcp = boost::asio::ip::tcp;
 namespace json = boost::json;
 
+
+class ConnectionPool {
+public:
+    ConnectionPool(const std::string& conn_string, std::size_t pool_size) 
+        : conn_string_(conn_string), pool_size_(pool_size) {
+        for (std::size_t i = 0; i < pool_size_; ++i) {
+            pool_.emplace(std::make_shared<pqxx::connection>(conn_string_));
+        }
+    }
+
+    std::shared_ptr<pqxx::connection> getConnection() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (pool_.empty()) {
+            throw std::runtime_error("No available connections");
+        }
+        auto conn = pool_.front();
+        pool_.pop();
+        return conn;
+    }
+
+    void releaseConnection(std::shared_ptr<pqxx::connection> conn) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        pool_.push(conn);
+    }
+
+private:
+    std::string conn_string_;
+    std::size_t pool_size_;
+    std::queue<std::shared_ptr<pqxx::connection>> pool_;
+    std::mutex mutex_;
+};
 // const std::string DB_CONNECTION = "dbname=tokens user=postgres password=pass123";
 // const std::string DB_CONNECTION = "host=localhost port=5432 dbname=tokens user=postgres password=pass123";
 // const std::string DB_CONNECTION = "host=db port=5432 dbname=tokens user=postgres password=pass123";
@@ -41,10 +72,7 @@ json::object readSecrets() {
 }
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-// std::string generateToken() {
-//     return "e3b0c44298fc1c149afbf4c8...";  // Для простоты возвращаем статичный токен
-// }
-
+ConnectionPool db_pool(DB_CONNECTION, 10);
 
 
 std::string generateToken() {
@@ -59,10 +87,11 @@ std::string generateToken() {
 // Проверка client_id и client_secret в базе данных
 bool authenticateClient(const std::string& client_id, const std::string& client_secret) {
     try {
-        pqxx::connection conn(DB_CONNECTION);
-        pqxx::work txn(conn);
+        //pqxx::connection conn(DB_CONNECTION);
+        auto conn = db_pool.getConnection();
+        pqxx::work txn(*conn);
         pqxx::result res = txn.exec("SELECT client_secret FROM public.user WHERE client_id = " + txn.quote(client_id));
-
+        db_pool.releaseConnection(conn);
         if (!res.empty() && res[0]["client_secret"].as<std::string>() == client_secret) {
             return true;
         }
@@ -115,10 +144,12 @@ bool authenticateClient(const std::string& client_id, const std::string& client_
 
 bool isTokenValid(const std::string& token) {
     try {
-        pqxx::connection conn(DB_CONNECTION);
-        pqxx::work txn(conn);
+        // pqxx::connection conn(DB_CONNECTION);
+        auto conn = db_pool.getConnection();
+        pqxx::work txn(*conn);
 
         pqxx::result res = txn.exec("SELECT expiration_time AT TIME ZONE 'UTC' AS expiration_time FROM public.token WHERE access_token = " + txn.quote(token));
+        db_pool.releaseConnection(conn);
         if (!res.empty()) {
             std::string dateTimeStr = res[0]["expiration_time"].as<std::string>();
             std::cout << "expiration_time from DB (UTC): " << dateTimeStr << std::endl;
@@ -202,8 +233,8 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
 
     if (authenticateClient(client_id, client_secret)) {
         try {
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
+            auto conn = db_pool.getConnection();
+            pqxx::work txn(*conn);
 
 //
             //pqxx::result res_db = txn.exec("SELECT scope FROM public.user WHERE client_id = " + txn.quote(client_id));
@@ -270,7 +301,7 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
                       txn.quote(client_id) + ", ARRAY[" + txn.quote(scope) + "], " + txn.quote(access_token) + 
                       ", CURRENT_TIMESTAMP + INTERVAL '2 hours')");
             txn.commit();
-
+            db_pool.releaseConnection(conn);
             json::object jsonResponse;
             jsonResponse["access_token"] = access_token;
             jsonResponse["expires_in"] = 7200;
