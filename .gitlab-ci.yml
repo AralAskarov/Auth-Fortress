@@ -46,8 +46,8 @@ deploy_job:
       "
 
     - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
-      if [ ! -f /etc/systemd/system/authfortress.service ]; then
-        sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOL
+        if [ ! -f /etc/systemd/system/authfortress.service ]; then
+          sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOL
       [Unit]
       Description=AuthFortress Docker Compose Service
       Requires=docker.service
@@ -63,11 +63,17 @@ deploy_job:
       
       [Install]
       WantedBy=multi-user.target
-      EOL'
+      EOL
           echo "authfortress.service создан."
         else
           echo "authfortress.service уже существует. Пропускаем создание."
         fi
+      EOF
+
+      - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
+        sudo systemctl daemon-reload
+        sudo systemctl enable authfortress.service
+        sudo systemctl restart authfortress.service
       EOF
   only:
     - master
