@@ -75,7 +75,7 @@ json::object readSecrets() {
 }
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-ConnectionPool db_pool(DB_CONNECTION, 10);
+ConnectionPool db_pool(DB_CONNECTION, 20);
 
 
 std::string generateToken() {
@@ -474,7 +474,7 @@ void do_session(tcp::socket socket) {
             http::request<http::string_body> req;
             http::response<http::string_body> res;
 
-            timer.expires_after(std::chrono::seconds(20));
+            timer.expires_after(std::chrono::seconds(10));
 
             // Ожидание выполнения операции или тайм-аута
             // timer.async_wait([&socket](const boost::system::error_code& ec) {
