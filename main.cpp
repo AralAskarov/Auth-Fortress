@@ -40,8 +40,7 @@ json::object readSecrets() {
     return jv.as_object();
 }
 json::object secrets = readSecrets();
-const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-// Генерация уникального токена
+const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
 // std::string generateToken() {
 //     return "e3b0c44298fc1c149afbf4c8...";  // Для простоты возвращаем статичный токен
 // }
@@ -56,15 +55,6 @@ std::string generateToken() {
 
 
 
-json::object readSecrets() {
-    std::ifstream ifs("/etc/vault/secrets/config.json");
-    if (!ifs.is_open()) {
-        throw std::runtime_error("Unable to open secrets file");
-    }
-    std::string content((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
-    json::value jv = json::parse(content);
-    return jv.as_object();
-}
 
 // Проверка client_id и client_secret в базе данных
 bool authenticateClient(const std::string& client_id, const std::string& client_secret) {
