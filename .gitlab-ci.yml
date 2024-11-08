@@ -45,17 +45,16 @@ deploy_job:
         docker-compose pull 
       "
 
-    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
-        if [ ! -f /etc/systemd/system/authfortress.service ]; then
-          scp -o StrictHostKeyChecking=no authfortress.service $SSH_USER@$SSH_HOST:/etc/systemd/system/
-          sudo systemctl daemon-reload
-          sudo systemctl enable authfortress.service
-          sudo systemctl restart authfortress.service
-          echo "authfortress.service создан и запущен."
-        else
-          echo "authfortress.service уже существует. Пропускаем передачу."
-        fi
-      "
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST \
+      "if [ ! -f /etc/systemd/system/authfortress.service ]; then \
+          scp -o StrictHostKeyChecking=no authfortress.service $SSH_USER@$SSH_HOST:/etc/systemd/system/ && \
+          sudo systemctl daemon-reload && \
+          sudo systemctl enable authfortress.service && \
+          sudo systemctl restart authfortress.service && \
+          echo 'authfortress.service создан и запущен.'; \
+      else \
+          echo 'authfortress.service уже существует. Пропускаем передачу.'; \
+      fi"
     
   only:
     - master
