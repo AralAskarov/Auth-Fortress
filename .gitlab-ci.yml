@@ -45,7 +45,7 @@ deploy_job:
         docker-compose pull 
       "
 
-    -ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
       if [ ! -f /etc/systemd/system/authfortress.service ]; then
         sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOL
       [Unit]
