@@ -22,6 +22,17 @@ RUN wget https://boostorg.jfrog.io/artifactory/main/release/1.81.0/source/boost_
 # Указываем путь к библиотекам Boost
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 # Копируем исходный код в контейнер
+
+RUN wget https://releases.hashicorp.com/vault/1.17.6/vault_1.17.6_linux_amd64.zip && \
+    unzip vault_1.17.6_linux_amd64.zip && \
+    mv vault /usr/local/bin/ && \
+    rm vault_1.17.6_linux_amd64.zip
+
+RUN mkdir -p /etc/vault /etc/vault/templates /etc/vault/secrets
+
+COPY vault-agent-config.hcl /etc/vault/
+COPY templates/ /etc/vault/templates/
+
 WORKDIR /app
 COPY . .
 
@@ -34,4 +45,4 @@ RUN g++ -std=c++17 -o app main.cpp -lpqxx -lpq -lboost_system -lboost_thread -lb
 EXPOSE 8080
 
 # Запускаем приложение
-CMD ["./app"]
+CMD ["sh", "-c", "vault agent -config=/etc/vault/vault-agent-config.hcl & ./app"]

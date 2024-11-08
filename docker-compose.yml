@@ -5,6 +5,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    volumes:
+      - ./vault/role_id:/etc/vault/role_id:ro
+      - ./vault/secret_id:/etc/vault/secret_id:ro
     expose:
       - "8080"  
     depends_on:
@@ -13,6 +16,7 @@ services:
     environment:
       - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
       - TZ=UTC
+      - VAULT_ADDR=https://your-vault-server:8200
 
   db:
     image: postgres:latest
