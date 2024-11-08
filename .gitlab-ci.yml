@@ -45,7 +45,7 @@ deploy_job:
         docker-compose pull 
       "
 
-    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST << 'EOF'
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
         if [ ! -f /etc/systemd/system/authfortress.service ]; then
           scp -o StrictHostKeyChecking=no authfortress.service $SSH_USER@$SSH_HOST:/etc/systemd/system/
           sudo systemctl daemon-reload
@@ -55,7 +55,7 @@ deploy_job:
         else
           echo "authfortress.service уже существует. Пропускаем передачу."
         fi
-      EOF
+      "
     
   only:
     - master
