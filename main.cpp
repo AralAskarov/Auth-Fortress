@@ -19,7 +19,10 @@
 #include <boost/asio/steady_timer.hpp> // Подключаем steady_timer для тайм-аута
 #include <chrono>
 #include <fstream>
-
+#include <queue>
+#include <memory> // Для std::shared_ptr
+#include <mutex>  // Для std::mutex
+#include <condition_variable> // Для std::condition_variable
 namespace beast = boost::beast;     
 namespace http = beast::http;       
 namespace net = boost::asio;        
