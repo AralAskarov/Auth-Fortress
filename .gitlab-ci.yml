@@ -43,7 +43,30 @@ deploy_job:
         git pull origin master &&
         docker-compose down --volumes --remove-orphans &&
         docker-compose pull &&
-        docker-compose up -d
+      "
+    - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+          if [ ! -f /etc/systemd/system/authfortress.service ]; then
+            sudo bash -c 'cat > /etc/systemd/system/authfortress.service <<EOF
+        [Unit]
+        Description=AuthFortress Docker Compose Service
+        Requires=docker.service
+        After=docker.service
+        
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        WorkingDirectory=$REMOTE_PATH
+        ExecStart=/usr/bin/docker-compose up -d
+        ExecStop=/usr/bin/docker-compose down
+        TimeoutStartSec=0
+        
+        [Install]
+        WantedBy=multi-user.target
+        EOF'"
+            - ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "
+                sudo systemctl daemon-reload &&
+                sudo systemctl enable authfortress.service &&
+                sudo systemctl restart authfortress.service
       "
   only:
     - master
