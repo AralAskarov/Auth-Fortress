@@ -17,6 +17,9 @@ services:
       - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
       - TZ=UTC
       - VAULT_ADDR=https://your-vault-server:8200
+    networks:
+      - app-network
+
 
   db:
     image: postgres:latest
@@ -33,6 +36,9 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 10s
       retries: 5
+    networks:
+      - app-network
+    
 
   flyway-clean:
     image: flyway/flyway:latest
@@ -45,6 +51,8 @@ services:
       - FLYWAY_PASSWORD=pass123
     volumes:
       - ./migrations:/flyway/sql
+    networks:
+      - app-network
 
   flyway-migrate:
     image: flyway/flyway:latest
@@ -58,6 +66,8 @@ services:
       - FLYWAY_PASSWORD=pass123
     volumes:
       - ./migrations:/flyway/sql
+    networks:
+      - app-network
 
   nginx:
     image: nginx:latest
@@ -67,6 +77,11 @@ services:
       - "80:80"  
     depends_on:
       - app
+    networks:
+      - app-network
+
+networks:
+  app-network:
 
 volumes:
   db_data:
