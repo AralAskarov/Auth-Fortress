@@ -22,7 +22,7 @@
 #include <queue>
 #include <memory> 
 #include <mutex>  
-#include <condition_variable> /
+#include <condition_variable> 
 namespace beast = boost::beast;     
 namespace http = beast::http;       
 namespace net = boost::asio;        
@@ -39,20 +39,29 @@ public:
         }
     }
 
+    // std::shared_ptr<pqxx::connection> getConnection() {
+    //     std::unique_lock<std::mutex> lock(mutex_);
+    //     if (pool_.empty()) {
+    //         throw std::runtime_error("No available connections");
+    //     }
+    //     auto conn = pool_.front();
+    //     pool_.pop();
+    //     return conn;
+    // }
     std::shared_ptr<pqxx::connection> getConnection() {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (pool_.empty()) {
-            throw std::runtime_error("No available connections");
-        }
+        cond_.wait(lock, [this] { return !pool_.empty(); });  // Ожидание свободного соединения
         auto conn = pool_.front();
         pool_.pop();
         return conn;
     }
 
     void releaseConnection(std::shared_ptr<pqxx::connection> conn) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        pool_.push(conn);
-        lock.unlock();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pool_.push(conn);
+        }
+        cond_.notify_one();
     }
 
 private:
@@ -60,6 +69,17 @@ private:
     std::size_t pool_size_;
     std::queue<std::shared_ptr<pqxx::connection>> pool_;
     std::mutex mutex_;
+    std::condition_variable cond_;
+};
+
+class ConnectionGuard {
+public:
+    ConnectionGuard(ConnectionPool& pool) : pool_(pool), conn_(pool_.getConnection()) {}
+    ~ConnectionGuard() { pool_.releaseConnection(conn_); }
+    std::shared_ptr<pqxx::connection> get() const { return conn_; }
+private:
+    ConnectionPool& pool_;
+    std::shared_ptr<pqxx::connection> conn_;
 };
 
 json::object readSecrets();
@@ -74,7 +94,7 @@ json::object readSecrets() {
 }
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-ConnectionPool db_pool(DB_CONNECTION, 100);
+ConnectionPool db_pool(DB_CONNECTION, 50);
 
 
 std::string generateToken() {
@@ -88,10 +108,9 @@ std::string generateToken() {
 
 bool authenticateClient(const std::string& client_id, const std::string& client_secret) {
     try {
-        auto conn = db_pool.getConnection();
-        pqxx::work txn(*conn);
+        ConnectionGuard guard(db_pool);
+        pqxx::work txn(*guard.get());
         pqxx::result res = txn.exec_prepared("authenticate_client", client_id);
-        db_pool.releaseConnection(conn);
         if (!res.empty() && res[0]["client_secret"].as<std::string>() == client_secret) {
             return true;
         }
@@ -144,11 +163,10 @@ bool authenticateClient(const std::string& client_id, const std::string& client_
 
 bool isTokenValid(const std::string& token) {
     try {
-        auto conn = db_pool.getConnection();
-        pqxx::work txn(*conn);
+        ConnectionGuard guard(db_pool);
+        pqxx::work txn(*guard.get());
 
         pqxx::result res = txn.exec_prepared("get_token", token);
-        db_pool.releaseConnection(conn);
         if (!res.empty()) {
             std::string dateTimeStr = res[0]["expiration_time"].as<std::string>();
             std::cout << "expiration_time from DB (UTC): " << dateTimeStr << std::endl;
@@ -231,8 +249,8 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
 
     if (authenticateClient(client_id, client_secret)) {
         try {
-            auto conn = db_pool.getConnection();
-            pqxx::work txn(*conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
 
 //
             // pqxx::result res_db = txn.exec("SELECT array_to_json(scope) AS scope FROM public.user WHERE client_id = " + txn.quote(client_id));
@@ -297,7 +315,6 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
                       txn.quote(client_id) + ", ARRAY[" + txn.quote(scope) + "], " + txn.quote(access_token) + 
                       ", CURRENT_TIMESTAMP + INTERVAL '2 hours')");
             txn.commit();
-            db_pool.releaseConnection(conn);
             json::object jsonResponse;
             jsonResponse["access_token"] = access_token;
             jsonResponse["expires_in"] = 7200;
@@ -328,8 +345,8 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
     if (isTokenValid(token)) {
         try {
 
-            auto conn = db_pool.getConnection();
-            pqxx::work txn(*conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
 
             // Запрашиваем access_scope, связанный с данным токеном
             //pqxx::result res_db = txn.exec("SELECT access_scope FROM public.token WHERE access_token = " + txn.quote(token));
@@ -445,6 +462,7 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
 //     socket.shutdown(tcp::socket::shutdown_send);
 // }
 
+
 void do_session(tcp::socket socket) {
     try {
         beast::flat_buffer buffer;
@@ -456,7 +474,21 @@ void do_session(tcp::socket socket) {
 
             timer.expires_after(std::chrono::seconds(20));
 
+            // Асинхронное ожидание тайм-аута
+            timer.async_wait([&socket](boost::system::error_code ec) {
+                if (!ec) {
+                    // Тайм-аут истёк, закрываем соединение
+                    boost::system::error_code shutdown_ec;
+                    socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
+                    socket.close(shutdown_ec);
+                }
+            });
+
+            // Чтение запроса
             http::read(socket, buffer, req);
+
+            // Сбрасываем таймер после успешного запроса
+            timer.cancel();
 
             if (req.method() == http::verb::post && req.target() == "/token") {
                 handleToken(req, res);
@@ -471,30 +503,80 @@ void do_session(tcp::socket socket) {
             if (req[http::field::connection] == "close") {
                 res.set(http::field::connection, "close");
                 http::write(socket, res);
-                break; 
+                break;
             } else {
                 res.set(http::field::connection, "keep-alive");
                 http::write(socket, res);
             }
 
             buffer.consume(buffer.size());
-
         }
     } catch (const beast::system_error& se) {
-        if (se.code() != http::error::end_of_stream)
+        if (se.code() != http::error::end_of_stream) {
             std::cerr << "Error: " << se.code().message() << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Unexpected error: " << e.what() << std::endl;
     }
 
-    socket.shutdown(tcp::socket::shutdown_send);
+    // Гарантированное завершение работы с сокетом
+    boost::system::error_code ec;
+    socket.shutdown(tcp::socket::shutdown_send, ec);
+    socket.close(ec);
 }
+
+
+
+// void do_session(tcp::socket socket) {
+//     try {
+//         beast::flat_buffer buffer;
+//         boost::asio::steady_timer timer(socket.get_executor());
+
+//         while (true) {
+//             http::request<http::string_body> req;
+//             http::response<http::string_body> res;
+
+//             timer.expires_after(std::chrono::seconds(20));
+
+//             http::read(socket, buffer, req);
+
+//             if (req.method() == http::verb::post && req.target() == "/token") {
+//                 handleToken(req, res);
+//             } else if (req.method() == http::verb::get && req.target() == "/check") {
+//                 handleCheck(req, res);
+//             } else {
+//                 res.result(http::status::not_found);
+//                 res.body() = "Not Found";
+//                 res.prepare_payload();
+//             }
+
+//             if (req[http::field::connection] == "close") {
+//                 res.set(http::field::connection, "close");
+//                 http::write(socket, res);
+//                 break; 
+//             } else {
+//                 res.set(http::field::connection, "keep-alive");
+//                 http::write(socket, res);
+//             }
+
+//             buffer.consume(buffer.size());
+
+//         }
+//     } catch (const beast::system_error& se) {
+//         if (se.code() != http::error::end_of_stream)
+//             std::cerr << "Error: " << se.code().message() << std::endl;
+//     }
+
+//     socket.shutdown(tcp::socket::shutdown_send);
+// }
 
 
 int main() {
     try {
 
         {
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
             txn.conn().prepare("authenticate_client", "SELECT client_secret FROM public.user WHERE client_id = $1");
             txn.conn().prepare("get_scope", "SELECT scope FROM public.user WHERE client_id = $1");
             txn.conn().prepare("get_token", "SELECT expiration_time FROM public.token WHERE access_token = $1");
@@ -503,17 +585,33 @@ int main() {
         }
 
         net::io_context ioc;
+
+        // Обработка сигналов для graceful shutdown
+        boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
+        signals.async_wait([&](boost::system::error_code /*ec*/, int /*signo*/) {
+            ioc.stop();
+        });
+
         tcp::acceptor acceptor(ioc, {tcp::v4(), 8080});
         boost::asio::thread_pool pool(std::thread::hardware_concurrency() * 2);
 
-        while (true) {
-            tcp::socket socket(ioc);
-            acceptor.accept(socket);
-            // std::thread{std::bind(&do_session, std::move(socket))}.detach();
-            boost::asio::post(pool, [s = std::move(socket)]() mutable {
-                do_session(std::move(s));
+        // Асинхронное принятие соединений
+        std::function<void()> do_accept;
+        do_accept = [&]() {
+            acceptor.async_accept([&](boost::system::error_code ec, tcp::socket socket) {
+                if (!ec) {
+                    boost::asio::post(pool, [s = std::move(socket)]() mutable {
+                        do_session(std::move(s));
+                    });
+                }
+                do_accept();
             });
-        }
+        };
+
+        do_accept();
+
+        ioc.run();
+        pool.join();
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << std::endl;
     }
