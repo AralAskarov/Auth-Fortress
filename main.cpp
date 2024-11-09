@@ -22,7 +22,7 @@
 #include <queue>
 #include <memory> 
 #include <mutex>  
-#include <condition_variable> /
+#include <condition_variable> 
 namespace beast = boost::beast;     
 namespace http = beast::http;       
 namespace net = boost::asio;        
@@ -50,9 +50,11 @@ public:
     }
 
     void releaseConnection(std::shared_ptr<pqxx::connection> conn) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        pool_.push(conn);
-        lock.unlock();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pool_.push(conn);
+        }
+        cond_.notify_one();
     }
 
 private:
@@ -60,6 +62,17 @@ private:
     std::size_t pool_size_;
     std::queue<std::shared_ptr<pqxx::connection>> pool_;
     std::mutex mutex_;
+    std::condition_variable cond_;
+};
+
+class ConnectionGuard {
+public:
+    ConnectionGuard(ConnectionPool& pool) : pool_(pool), conn_(pool_.getConnection()) {}
+    ~ConnectionGuard() { pool_.releaseConnection(conn_); }
+    std::shared_ptr<pqxx::connection> get() const { return conn_; }
+private:
+    ConnectionPool& pool_;
+    std::shared_ptr<pqxx::connection> conn_;
 };
 
 json::object readSecrets();
@@ -88,10 +101,9 @@ std::string generateToken() {
 
 bool authenticateClient(const std::string& client_id, const std::string& client_secret) {
     try {
-        auto conn = db_pool.getConnection();
-        pqxx::work txn(*conn);
+        ConnectionGuard guard(db_pool);
+        pqxx::work txn(*guard.get());
         pqxx::result res = txn.exec_prepared("authenticate_client", client_id);
-        db_pool.releaseConnection(conn);
         if (!res.empty() && res[0]["client_secret"].as<std::string>() == client_secret) {
             return true;
         }
@@ -144,11 +156,10 @@ bool authenticateClient(const std::string& client_id, const std::string& client_
 
 bool isTokenValid(const std::string& token) {
     try {
-        auto conn = db_pool.getConnection();
-        pqxx::work txn(*conn);
+        ConnectionGuard guard(db_pool);
+        pqxx::work txn(*guard.get());
 
         pqxx::result res = txn.exec_prepared("get_token", token);
-        db_pool.releaseConnection(conn);
         if (!res.empty()) {
             std::string dateTimeStr = res[0]["expiration_time"].as<std::string>();
             std::cout << "expiration_time from DB (UTC): " << dateTimeStr << std::endl;
@@ -231,8 +242,8 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
 
     if (authenticateClient(client_id, client_secret)) {
         try {
-            auto conn = db_pool.getConnection();
-            pqxx::work txn(*conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
 
 //
             // pqxx::result res_db = txn.exec("SELECT array_to_json(scope) AS scope FROM public.user WHERE client_id = " + txn.quote(client_id));
@@ -297,7 +308,6 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
                       txn.quote(client_id) + ", ARRAY[" + txn.quote(scope) + "], " + txn.quote(access_token) + 
                       ", CURRENT_TIMESTAMP + INTERVAL '2 hours')");
             txn.commit();
-            db_pool.releaseConnection(conn);
             json::object jsonResponse;
             jsonResponse["access_token"] = access_token;
             jsonResponse["expires_in"] = 7200;
@@ -328,8 +338,8 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
     if (isTokenValid(token)) {
         try {
 
-            auto conn = db_pool.getConnection();
-            pqxx::work txn(*conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
 
             // Запрашиваем access_scope, связанный с данным токеном
             //pqxx::result res_db = txn.exec("SELECT access_scope FROM public.token WHERE access_token = " + txn.quote(token));
@@ -503,17 +513,33 @@ int main() {
         }
 
         net::io_context ioc;
+
+        // Обработка сигналов для graceful shutdown
+        boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);
+        signals.async_wait([&](boost::system::error_code /*ec*/, int /*signo*/) {
+            ioc.stop();
+        });
+
         tcp::acceptor acceptor(ioc, {tcp::v4(), 8080});
         boost::asio::thread_pool pool(std::thread::hardware_concurrency() * 2);
 
-        while (true) {
-            tcp::socket socket(ioc);
-            acceptor.accept(socket);
-            // std::thread{std::bind(&do_session, std::move(socket))}.detach();
-            boost::asio::post(pool, [s = std::move(socket)]() mutable {
-                do_session(std::move(s));
+        // Асинхронное принятие соединений
+        std::function<void()> do_accept;
+        do_accept = [&]() {
+            acceptor.async_accept([&](boost::system::error_code ec, tcp::socket socket) {
+                if (!ec) {
+                    boost::asio::post(pool, [s = std::move(socket)]() mutable {
+                        do_session(std::move(s));
+                    });
+                }
+                do_accept();
             });
-        }
+        };
+
+        do_accept();
+
+        ioc.run();
+        pool.join();
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << std::endl;
     }
