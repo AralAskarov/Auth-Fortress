@@ -16,7 +16,7 @@ services:
     environment:
       - DB_CONNECTION=host=db port=5432 dbname=tokens user=postgres password=pass123
       - TZ=UTC
-      - VAULT_ADDR=https://your-vault-server:8200
+      - VAULT_ADDR=https://vault.medhelper.xyz:8200
     networks:
       - app-network
 

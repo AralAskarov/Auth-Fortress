@@ -39,11 +39,18 @@ public:
         }
     }
 
+    // std::shared_ptr<pqxx::connection> getConnection() {
+    //     std::unique_lock<std::mutex> lock(mutex_);
+    //     if (pool_.empty()) {
+    //         throw std::runtime_error("No available connections");
+    //     }
+    //     auto conn = pool_.front();
+    //     pool_.pop();
+    //     return conn;
+    // }
     std::shared_ptr<pqxx::connection> getConnection() {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (pool_.empty()) {
-            throw std::runtime_error("No available connections");
-        }
+        cond_.wait(lock, [this] { return !pool_.empty(); });  // Ожидание свободного соединения
         auto conn = pool_.front();
         pool_.pop();
         return conn;
@@ -87,7 +94,7 @@ json::object readSecrets() {
 }
 json::object secrets = readSecrets();
 const std::string DB_CONNECTION = secrets["DB_CONNECTION"].as_string().c_str();
-ConnectionPool db_pool(DB_CONNECTION, 100);
+ConnectionPool db_pool(DB_CONNECTION, 50);
 
 
 std::string generateToken() {
@@ -455,6 +462,7 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
 //     socket.shutdown(tcp::socket::shutdown_send);
 // }
 
+
 void do_session(tcp::socket socket) {
     try {
         beast::flat_buffer buffer;
@@ -466,7 +474,21 @@ void do_session(tcp::socket socket) {
 
             timer.expires_after(std::chrono::seconds(20));
 
+            // Асинхронное ожидание тайм-аута
+            timer.async_wait([&socket](boost::system::error_code ec) {
+                if (!ec) {
+                    // Тайм-аут истёк, закрываем соединение
+                    boost::system::error_code shutdown_ec;
+                    socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
+                    socket.close(shutdown_ec);
+                }
+            });
+
+            // Чтение запроса
             http::read(socket, buffer, req);
+
+            // Сбрасываем таймер после успешного запроса
+            timer.cancel();
 
             if (req.method() == http::verb::post && req.target() == "/token") {
                 handleToken(req, res);
@@ -481,30 +503,80 @@ void do_session(tcp::socket socket) {
             if (req[http::field::connection] == "close") {
                 res.set(http::field::connection, "close");
                 http::write(socket, res);
-                break; 
+                break;
             } else {
                 res.set(http::field::connection, "keep-alive");
                 http::write(socket, res);
             }
 
             buffer.consume(buffer.size());
-
         }
     } catch (const beast::system_error& se) {
-        if (se.code() != http::error::end_of_stream)
+        if (se.code() != http::error::end_of_stream) {
             std::cerr << "Error: " << se.code().message() << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Unexpected error: " << e.what() << std::endl;
     }
 
-    socket.shutdown(tcp::socket::shutdown_send);
+    // Гарантированное завершение работы с сокетом
+    boost::system::error_code ec;
+    socket.shutdown(tcp::socket::shutdown_send, ec);
+    socket.close(ec);
 }
+
+
+
+// void do_session(tcp::socket socket) {
+//     try {
+//         beast::flat_buffer buffer;
+//         boost::asio::steady_timer timer(socket.get_executor());
+
+//         while (true) {
+//             http::request<http::string_body> req;
+//             http::response<http::string_body> res;
+
+//             timer.expires_after(std::chrono::seconds(20));
+
+//             http::read(socket, buffer, req);
+
+//             if (req.method() == http::verb::post && req.target() == "/token") {
+//                 handleToken(req, res);
+//             } else if (req.method() == http::verb::get && req.target() == "/check") {
+//                 handleCheck(req, res);
+//             } else {
+//                 res.result(http::status::not_found);
+//                 res.body() = "Not Found";
+//                 res.prepare_payload();
+//             }
+
+//             if (req[http::field::connection] == "close") {
+//                 res.set(http::field::connection, "close");
+//                 http::write(socket, res);
+//                 break; 
+//             } else {
+//                 res.set(http::field::connection, "keep-alive");
+//                 http::write(socket, res);
+//             }
+
+//             buffer.consume(buffer.size());
+
+//         }
+//     } catch (const beast::system_error& se) {
+//         if (se.code() != http::error::end_of_stream)
+//             std::cerr << "Error: " << se.code().message() << std::endl;
+//     }
+
+//     socket.shutdown(tcp::socket::shutdown_send);
+// }
 
 
 int main() {
     try {
 
         {
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
+            ConnectionGuard guard(db_pool);
+            pqxx::work txn(*guard.get());
             txn.conn().prepare("authenticate_client", "SELECT client_secret FROM public.user WHERE client_id = $1");
             txn.conn().prepare("get_scope", "SELECT scope FROM public.user WHERE client_id = $1");
             txn.conn().prepare("get_token", "SELECT expiration_time FROM public.token WHERE access_token = $1");
@@ -546,4 +618,3 @@ int main() {
 
     return 0;
 }
-
