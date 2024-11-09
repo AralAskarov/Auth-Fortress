@@ -16,13 +16,13 @@
 #include <sstream>
 #include <stdexcept>
 
-#include <boost/asio/steady_timer.hpp> // Подключаем steady_timer для тайм-аута
+#include <boost/asio/steady_timer.hpp> 
 #include <chrono>
 #include <fstream>
 #include <queue>
-#include <memory> // Для std::shared_ptr
-#include <mutex>  // Для std::mutex
-#include <condition_variable> // Для std::condition_variable
+#include <memory> 
+#include <mutex>  
+#include <condition_variable> /
 namespace beast = boost::beast;     
 namespace http = beast::http;       
 namespace net = boost::asio;        
@@ -86,13 +86,10 @@ std::string generateToken() {
 
 
 
-// Проверка client_id и client_secret в базе данных
 bool authenticateClient(const std::string& client_id, const std::string& client_secret) {
     try {
-        //pqxx::connection conn(DB_CONNECTION);
         auto conn = db_pool.getConnection();
         pqxx::work txn(*conn);
-        // pqxx::result res = txn.exec("SELECT client_secret FROM public.user WHERE client_id = " + txn.quote(client_id));
         pqxx::result res = txn.exec_prepared("authenticate_client", client_id);
         db_pool.releaseConnection(conn);
         if (!res.empty() && res[0]["client_secret"].as<std::string>() == client_secret) {
@@ -196,7 +193,6 @@ bool isTokenValid(const std::string& token) {
 
 
 
-// Эндпоинт для создания токена
 void handleToken(http::request<http::string_body>& req, http::response<http::string_body>& res) {
     auto params = json::parse(req.body()).as_object();
 
@@ -230,7 +226,7 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
         res.set(http::field::content_type, "application/json");
         res.body() = json::serialize(errorResponse);
         res.prepare_payload();
-        return; // Завершаем функцию, так как grant_type неверный
+        return; // Завершаем функцию, тk grant_type неверный
     }
 
     if (authenticateClient(client_id, client_secret)) {
@@ -252,7 +248,6 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
                 return;
             }
             
-            // Преобразуем массив scope из базы данных в список строк
             // std::vector<std::string> allowed_scopes;
             // for (const auto& scope_item : res_db[0]["scope"].as_array()) {
             //     allowed_scopes.push_back(scope_item.as<std::string>());
@@ -325,23 +320,14 @@ void handleToken(http::request<http::string_body>& req, http::response<http::str
     res.prepare_payload();
 }
 
-// Эндпоинт для проверки токена
 void handleCheck(http::request<http::string_body>& req, http::response<http::string_body>& res) {
     // std::string authHeader = req[http::field::authorization].to_string();
     std::string authHeader = std::string(req[http::field::authorization]);
     std::string token = authHeader.substr(authHeader.find(" ") + 1);
 
     if (isTokenValid(token)) {
-        // json::object jsonResponse;
-        // jsonResponse["scope"] = "push_send";
-
-        // res.result(http::status::ok);
-        // res.set(http::field::content_type, "application/json");
-        // res.body() = json::serialize(jsonResponse);
         try {
-            // Открываем соединение с базой данных
-            // pqxx::connection conn(DB_CONNECTION);
-            // pqxx::work txn(conn);
+
             auto conn = db_pool.getConnection();
             pqxx::work txn(*conn);
 
@@ -378,24 +364,20 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
                 //     scope_array.push_back(json::value(scope));
                 // }
 
-                // Формируем JSON-ответ с `scope`
                 json::object jsonResponse;
                 jsonResponse["client_id"] = client_id;
-                // jsonResponse["scope"] = scopes;
                 jsonResponse["scope"] = scope_array;
 
                 res.result(http::status::ok);
                 res.set(http::field::content_type, "application/json");
                 res.body() = json::serialize(jsonResponse);
             } else {
-                // Если токен не найден, возвращаем ошибку
                 json::object jsonResponse;
                 jsonResponse["error"] = "Token not found";
                 res.result(http::status::unauthorized);
                 res.body() = json::serialize(jsonResponse);
             }
         } catch (const std::exception &e) {
-            // Обработка ошибки базы данных
             std::cerr << "Token verification error: " << e.what() << std::endl;
             res.result(http::status::internal_server_error);
             res.body() = "Server error";
@@ -410,7 +392,6 @@ void handleCheck(http::request<http::string_body>& req, http::response<http::str
     res.prepare_payload();
 }
 
-// Основная функция для обработки запросов
 // реализация без keep alive
 // void do_session(tcp::socket& socket) {
 //     try {
@@ -469,26 +450,14 @@ void do_session(tcp::socket socket) {
         beast::flat_buffer buffer;
         boost::asio::steady_timer timer(socket.get_executor());
 
-        // Начало цикла для обработки нескольких запросов на одном соединении
         while (true) {
             http::request<http::string_body> req;
             http::response<http::string_body> res;
 
             timer.expires_after(std::chrono::seconds(20));
 
-            // Ожидание выполнения операции или тайм-аута
-            // timer.async_wait([&socket](const boost::system::error_code& ec) {
-            //     if (!ec) {
-            //         // Если таймер сработал без ошибок, закрываем сокет
-            //         socket.close();
-            //     }
-            // });
-
-            // Чтение запроса
             http::read(socket, buffer, req);
 
-            // timer.cancel();
-            // Обработка запроса в зависимости от пути
             if (req.method() == http::verb::post && req.target() == "/token") {
                 handleToken(req, res);
             } else if (req.method() == http::verb::get && req.target() == "/check") {
@@ -499,28 +468,23 @@ void do_session(tcp::socket socket) {
                 res.prepare_payload();
             }
 
-            // Если клиент указал Connection: close, закрываем соединение после ответа
             if (req[http::field::connection] == "close") {
                 res.set(http::field::connection, "close");
                 http::write(socket, res);
-                break; // Выходим из цикла и закрываем сокет
+                break; 
             } else {
                 res.set(http::field::connection, "keep-alive");
                 http::write(socket, res);
             }
 
-            // Очищаем буфер для следующего запроса
             buffer.consume(buffer.size());
 
-            // Устанавливаем тайм-аут на 20 секунд
-            // socket.expires_after(std::chrono::seconds(20));
         }
     } catch (const beast::system_error& se) {
         if (se.code() != http::error::end_of_stream)
             std::cerr << "Error: " << se.code().message() << std::endl;
     }
 
-    // Закрываем соединение после завершения всех запросов
     socket.shutdown(tcp::socket::shutdown_send);
 }
 
@@ -531,13 +495,9 @@ int main() {
         {
             pqxx::connection conn(DB_CONNECTION);
             pqxx::work txn(conn);
-            // Подготовка запроса для аутентификации клиента
             txn.conn().prepare("authenticate_client", "SELECT client_secret FROM public.user WHERE client_id = $1");
-            // Подготовка запроса для получения scope клиента
             txn.conn().prepare("get_scope", "SELECT scope FROM public.user WHERE client_id = $1");
-            // Подготовка запроса для получения токена
             txn.conn().prepare("get_token", "SELECT expiration_time FROM public.token WHERE access_token = $1");
-            // Подготовка запроса для получения деталей токена
             txn.conn().prepare("get_token_details", "SELECT u.client_id, t.access_scope FROM public.token t JOIN public.user u ON t.client_id = u.client_id WHERE t.access_token = $1");
             txn.commit();
         }
